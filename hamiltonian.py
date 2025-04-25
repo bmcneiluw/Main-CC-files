@@ -12,6 +12,8 @@ np.set_printoptions(suppress = True, linewidth = 1500, threshold = 10000, precis
 def hamiltonian(sites:int, states:int, mix_factor:float = 0, g:float = 1,  onesite:bool = True, twosite:bool = True, timer = False)->np.array:
     """Calculates full quantum rotor hamiltonian in pqrs basis from Shaeer's m basis rotor generator code"""
 
+    file_path = r"C:\Users\Bryan\Desktop\Coop\Shaeer_code\MatrixElementGenerator"
+
     # Start timer to find how long it takes to put values in hamiltonian
     start = time.perf_counter()
 
@@ -59,7 +61,7 @@ def hamiltonian(sites:int, states:int, mix_factor:float = 0, g:float = 1,  onesi
         #key is (m_1, m_2)
         #shaeer code offsets m value by shaeer_m_max (normally 5)
         h_dict_1 = defaultdict(float)
-        with open(r"C:\Users\Bryan\Desktop\Coop\Shaeer_code\MatrixElementGenerator\matrix_elements_K.csv", mode = "r", newline = "") as csvfile_h_1:
+        with open(file_path + r"\matrix_elements_K.csv", mode = "r", newline = "") as csvfile_h_1:
             reader_h_1 = csv.reader(csvfile_h_1, delimiter = ",")
             #skips first two lines which are formatting and don't contain values
             next(reader_h_1)
@@ -69,7 +71,6 @@ def hamiltonian(sites:int, states:int, mix_factor:float = 0, g:float = 1,  onesi
                     #shaeer's code shifts m values to 0 to 2 * m_max, this shifts it back to -m_max to m_max
                     h_dict_1[((int(row_h[0]) - m_max_shaeer), (int(row_h[1]) - m_max_shaeer))] = float(row_h[2])
                     #his code only does upper diagonal elements however it is currently only diagonal elements so this could be simplified
-
 
         #goes through onesite dictionaries to plot points in matrix
         for onesite_hamiltonian_term in range(sites):
@@ -101,12 +102,11 @@ def hamiltonian(sites:int, states:int, mix_factor:float = 0, g:float = 1,  onesi
                 # if twosite_index + 1 != sites:
                 #     location_dict_2[twosite_index][key_2].append((index_2, state_2[twosite_index], state_2[(twosite_index + 1)]))
 
-
         # dictionary for all non-zero values from shaeer V tensor
         # key is (m_1, m_2, m_3, m_4)
         # shaeer code offsets m value by shaeer_m_max (normally 5)
         h_dict_2 = defaultdict(float)
-        with open(r"C:\Users\Bryan\Desktop\Coop\Shaeer_code\MatrixElementGenerator\matrix_elements_V.csv", mode = "r", newline = "") as csvfile_v_1:
+        with open(file_path + r"\matrix_elements_V.csv", mode = "r", newline = "") as csvfile_v_1:
             reader_v_1 = csv.reader(csvfile_v_1, delimiter = ",")
             next(reader_v_1)
             next(reader_v_1)
