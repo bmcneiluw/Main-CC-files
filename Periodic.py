@@ -1,11 +1,7 @@
 import numpy as np
-import scipy as sp
 import csv
 import functions as func
 import writeMatrixElements as wME
-import time
-
-start = time.perf_counter()
 
 #printout settings for large matrices
 np.set_printoptions(suppress = True, linewidth = 1500, threshold = 10000, precision = 12)
@@ -98,9 +94,11 @@ with open(file_path_testing, "r") as testing_file:
             value_testing = value_testing.capitalize()
             value_testing = func.str_to_bool(value_testing)
 
+        #if line is empty skip
         if value_testing == "":
             continue
 
+        #checks that all keys exist
         if key_testing in expected_types:
             missing_keys.discard(key_testing)
             expected_type = expected_types[key_testing][0]
@@ -134,6 +132,7 @@ if errors:
 
 del errors
 
+#variables values from dictionary
 sites = values["sites"]
 states = values["states"]
 low_states = values["low_states"]
@@ -149,6 +148,8 @@ if start_point != "cos" and start_point != "sin":
 
 del values
 
+#site labels
+#only p, i, a are needed but these extra ones make the einsums and h v a b terms more readable
 p = q = r = s = states
 i = j = k = l = low_states
 a = b = c = d = p - i
@@ -157,13 +158,12 @@ a = b = c = d = p - i
 if i %2 == 0:
     raise ValueError("Overlap between low and high stats, will cause divide by zero in denominator update")
 
+#checks for valid i method value
 if i_method not in [0, 1, 2, 3]:
     raise ValueError("I method value outside range")
 
+#maximum m basis value
 m_max = abs(func.p_to_m(states - 1))
-
-#gets h values from csv files made with Shaeer's code and puts them into a dictionary
-h_dict = dict()
 
 #checks for the max generated size of h and v values
 with open(file_path_K, mode = "r",newline = "") as check:
@@ -179,6 +179,10 @@ if max_check < states:
 #shaeer's code generates 0 to 2 * L instead of -L to L so it needs to be shifted over for correct m indexing
 max_shift = func.p_to_m(max_check - 1)
 
+#gets h values from csv files made with Shaeer's code and puts them into a dictionary
+h_dict = dict()
+
+#values for h term
 with open(file_path_K, mode = "r",newline = "") as csvfile_h:
     reader_h = csv.reader(csvfile_h, delimiter = ",")
     next(reader_h)
@@ -188,9 +192,9 @@ with open(file_path_K, mode = "r",newline = "") as csvfile_h:
             h_dict[((int(row_h[0]) - max_shift), (int(row_h[1]) - max_shift))] = float(row_h[2])
 
 #creates h term of size (p, p) so that it can be sliced
-
 h_full = np.zeros((p, p))
 
+#goes through h dict to populate max size h term
 for h_row in range(p):
     for h_col in range(p):
         h_full[h_row, h_col] = h_dict.get((func.p_to_m(h_row), func.p_to_m(h_col)), 0)
@@ -198,6 +202,7 @@ for h_row in range(p):
 #h_dict is no longer needed due to h_full
 del h_dict
 
+#dictionary for v values from shaeer's code
 v_dict = dict()
 with open(file_path_V, mode = "r",newline = "") as csvfile_v:
     reader_v = csv.reader(csvfile_v, delimiter = ",")
@@ -206,12 +211,14 @@ with open(file_path_V, mode = "r",newline = "") as csvfile_v:
     for row_v in reader_v:
         if float(row_v[4]) != 0.0:
             v_dict[((int(row_v[0]) - max_shift), (int(row_v[1]) - max_shift), (int(row_v[2]) - max_shift), (int(row_v[3]) - max_shift))] = float(row_v[4])
+            #shaeer's code only does upper triangular values
             if int(row_v[0]) != int(row_v[2]) and int(row_v[1]) != int(row_v[3]):
                 v_dict[((int(row_v[2]) - max_shift), (int(row_v[3]) - max_shift), (int(row_v[0]) - max_shift), (int(row_v[1]) - max_shift))] = float(row_v[4])
 
 #creates maximum size v term (p, p, p, p) so that it can be sliced
 v_full = np.zeros((p, p, p, p))
 
+#populates max size v term
 for v_axis_0 in range(p):
     for v_axis_1 in range(p):
         for v_axis_2 in range(p):
@@ -221,24 +228,38 @@ for v_axis_0 in range(p):
 #v_dict no longer needed due to v_full
 del v_dict
 
-t_a_i_tensor = np.full((sites, a, i), initial, dtype = complex)
-t_ab_ij_tensor = np.full((sites, sites, a, b, i, j), initial, dtype = complex)
+#starting point using sin needs complex values
+if HF and start_point == "sin":
+    t_a_i_tensor = np.full((sites, a, i), initial, dtype=complex)
+    t_ab_ij_tensor = np.full((sites, sites, a, b, i, j), initial, dtype=complex)
+#otherwise use real matrices
+else:
+    t_a_i_tensor = np.full((sites, a, i), initial)
+    t_ab_ij_tensor = np.full((sites, sites, a, b, i, j), initial)
+
 for set_zero in range(sites):
     t_ab_ij_tensor[set_zero, set_zero, :, :, :, :] = 0
 
 if HF:
+    #crit point negative is just for testing should change
     crit_point = -0.5
     # Initialize the density matrix based on the starting point and the matrix form
     if g > crit_point:
         # ⟨m|cosφ|n⟩ = 0.5 * δ_{m, n+1} + 0.5 * δ_{m, n-1}
         # ⟨m|sinφ|n⟩ = 1/(2i) * δ_{m, n+1} + 1/(2i) * δ_{m, n-1}
-        matrix = np.zeros((states, states), dtype = complex)
+        if start_point == "sin":
+            matrix = np.zeros((states, states), dtype = complex)
+        else:
+            matrix = np.zeros((states, states))
 
-        t = {"cos": 0.5, "sin": 1 / (2j)}[start_point]
+        #uses real values for cos and complex for sin
+        t = {"cos": 0.5, "sin": 1 / 2j}[start_point]
 
+        #adds elements to trig matrix
         for off_diag in range(states - 1):
             matrix[off_diag, off_diag + 1] = t
             matrix[off_diag + 1, off_diag] = np.conj(t)
+
 
         # ⟨m|cos^2φ|n⟩ = 0.5 * δ_{m, n} + 0.5 * (δ_{m, n+2} + δ_{m, n-2})
         # ⟨m|cos^2φ|n⟩ = 0.5 * δ_{m, n} - 0.5 * (δ_{m, n+2} + δ_{m, n-2})
@@ -249,44 +270,55 @@ if HF:
             cos_2phi[off, off + 2] = 1
             cos_2phi[off + 2, off] = 1
 
+        # cos^2φ = (1 + cos(2φ))/ 2
+        # sin^2φ = (1 - cos(2φ))/ 2
         if start_point == "cos":
             matrix_squared = 0.5 * (I + cos_2phi)
-        elif start == "sin":
+        elif start_point == "sin":
             matrix_squared = 0.5 * (I - cos_2phi)
 
     else:
+        #uses h as starting point if g < crit point
         matrix = h_full
 
-    mix_factor = -0.1
-
-    h_full += mix_factor * matrix
+    #stuff I never got to
+    #mix_factor = -0.1
+    #h_full += mix_factor * matrix
 
     vals, vecs = np.linalg.eigh(matrix)
 
+    #occupied orbitals
     U_occ = vecs[:, :i]
     density = U_occ @ U_occ.conj().T
 
     iteration_density = 0
+    #hartree fock iterative calculations
     while True:
         iteration_density += 1
-
+        #could use 2 * np.einsum("mknl, lk ->mn", v_full, density) instead, gives same thing
+        # noinspection SpellCheckingInspection
         fock = h_full + np.einsum("mknl, lk ->mn", v_full, density) + np.einsum("mknl, mn ->lk", v_full, density)
+        #makes sure fock is hermitian
         fock = 0.5 * fock + 0.5 * fock.conj().T
 
         fock_val, fock_vec = np.linalg.eigh(fock)
 
+        #checks that fock eigenvectors are unitary
         if not np.allclose(fock_vec.conj().T @ fock_vec, np.identity(states)):
             raise ValueError("Fock vectors not unitary")
 
         print(f"Iteration density: {iteration_density}")
 
+        #calculates initial fock occupied orbital
         if iteration_density == 1:
             f_occ = fock_vec[:, :i]
             f_occ_zero = f_occ.copy()
         else:
+            #overlap integral
             overlap = abs(np.einsum("ka, kl->la", f_occ_zero, fock_vec))
             overlap_index = np.argmax(abs(overlap))
 
+            #changes largest overlap eigenvector and eigenvalue to be first
             if overlap_index != 0:
                 #switches the largest overlap vector to 0th position
                 fock_val[[0, overlap_index]] = fock_val[[overlap_index, 0]]
@@ -294,30 +326,38 @@ if HF:
 
             f_occ = fock_vec[:, :i]
 
+        #calculates new density matrix
         density_update = np.einsum("ki, li ->kl", f_occ, f_occ)
         max_change = np.max(np.abs(density - density_update))
-
-        mix_param = 0.5
-        density = mix_param * density + (1 - mix_param) * density_update
         print(f"max change: {max_change}")
 
-        expval = np.trace(matrix @ density)
-        expval_squared = np.trace(matrix_squared @ density)
+        #how much the density matrix gets updated
+        mix_param = 0.5
+        density = mix_param * density + (1 - mix_param) * density_update
 
-        print(f"⟨{start_point}⟩ = {np.real(expval)}")
+        if g > crit_point:
+            #calculates the expectation value and variance of cosφ
+            #haven't tested for sinφ, might need some changes
+            expval = np.trace(matrix @ density)
+            expval_squared = np.trace(matrix_squared @ density)
 
-        variance = expval_squared - expval ** 2
+            print(f"⟨{start_point}⟩ = {np.real(expval)}")
 
-        print(f"Var({start_point}) = {np.real(variance)}\n")
+            variance = expval_squared - expval ** 2
 
+            print(f"Var({start_point}) = {np.real(variance)}\n")
+
+        #stopping condition for fock matrix updates
         if max_change < 1e-10 or iteration_density == 250:
             break
 
+    #once the density matrix has converged calculate fock lat time
     fock_final = h_full + 2 * np.einsum("mknl, lk ->mn", v_full, density)
 
     fock_final = 0.5 * fock_final + 0.5 * fock_final.conj().T
     fock_final_val, fock_final_vec = np.linalg.eigh(fock_final)
 
+    #overlap integrals
     overlap_final = abs(np.einsum("ka, kl->la", f_occ_zero, fock_final_vec))
     overlap_index_final = np.argmax(abs(overlap_final))
 
@@ -327,64 +367,69 @@ if HF:
 
     f_final_occ = fock_final_vec[:, :i]
 
+    #check eigenvectors unitary
     if not np.allclose(fock_final_vec.conj().T @ fock_final_vec, np.identity(states)):
         raise ValueError("Fock final vectors not unitary")
 
+    #checks that the difference between density and 2nd last density are the same
     density_final = np.einsum("pi, qi ->pq", f_final_occ, f_final_occ)
     if not np.allclose(density_final,density):
         print(density)
         print(density_final)
         raise ValueError("Density problem")
 
-    h_pq = h_full.copy()
-    v_pqrs = v_full.copy()
+    #various tests to check that basis transformations are working
+    #h_pq = h_full.copy()
+    #v_pqrs = v_full.copy()
 
+    #Need these
+    #transformation to fock basis
     h_full = fock_final_vec.conj().T @ h_full @ fock_final_vec
     v_full = np.einsum("pi, qj, pqrs, rk, sl->ijkl", fock_final_vec, fock_final_vec, v_full, fock_final_vec, fock_final_vec)
 
+    #Should maybe make these some functions that you call instead
+    #more test stuff
+    #u_pj = fock_final_vec
 
+    #i_pq = np.einsum("pj, qj ->pq", u_pj, u_pj)
+    #print(f"U pj U qj unitary test: {np.allclose(i_pq, np.identity(states))}")
 
-    u_pj = fock_final_vec
+    #i_ij = np.einsum("pj, pi ->ij", u_pj, u_pj)
+    #print(f"U pj U pi unitary test: {np.allclose(i_ij, np.identity(states))}")
 
-    i_pq = np.einsum("pj, qj ->pq", u_pj, u_pj)
-    print(f"U pj U qj unitary test: {np.allclose(i_pq, np.identity(states))}")
+    #d_pq = density_final.copy()
 
-    i_ij = np.einsum("pj, pi ->ij", u_pj, u_pj)
-    print(f"U pj U pi unitary test: {np.allclose(i_ij, np.identity(states))}")
-
-    d_pq = density_final.copy()
-
-    d_ij = np.einsum("pi, pq, qj->ij",u_pj, d_pq, u_pj)
+    #d_ij = np.einsum("pi, pq, qj->ij",u_pj, d_pq, u_pj)
     #print(f"D ij\n{d_ij}")
 
-    d_ij_check = np.zeros((states, states))
-    d_ij_check[0, 0] = 1
-    print(f"D ij test: {np.allclose(d_ij, d_ij_check)}")
+    #d_ij_check = np.zeros((states, states))
+    #d_ij_check[0, 0] = 1
+    #print(f"D ij test: {np.allclose(d_ij, d_ij_check)}")
 
-    f_pq_0 = fock_final
+    #f_pq_0 = fock_final
 
-    f_ij_0 = np.einsum("pi, pq, qj ->ij", u_pj, f_pq_0, u_pj)
+    #f_ij_0 = np.einsum("pi, pq, qj ->ij", u_pj, f_pq_0, u_pj)
 
-    f_ij_0_check = np.diag(fock_final_val)
-    print(f"F ij 0 test: {np.allclose(f_ij_0, f_ij_0_check)}")
+    #f_ij_0_check = np.diag(fock_final_val)
+    #print(f"F ij 0 test: {np.allclose(f_ij_0, f_ij_0_check)}")
 
-    f_pq_1 = h_pq + 2 * np.einsum("prqs, sr ->pq", v_pqrs, d_pq)
-    print(f"F pq 0 and 1 check: {np.allclose(f_pq_0, f_pq_1)}")
+    #f_pq_1 = h_pq + 2 * np.einsum("prqs, sr ->pq", v_pqrs, d_pq)
+    #print(f"F pq 0 and 1 check: {np.allclose(f_pq_0, f_pq_1)}")
 
-    v_piqj = np.einsum("prqs, ri, sj -> piqj", v_pqrs, u_pj, u_pj)
+    #v_piqj = np.einsum("prqs, ri, sj -> piqj", v_pqrs, u_pj, u_pj)
 
-    f_pq_2 = h_pq + 2 * np.einsum("piqj, ij ->pq", v_piqj, d_ij)
-    print(f"F pq 0 and 2 check: {np.allclose(f_pq_0, f_pq_2)}")
+    #f_pq_2 = h_pq + 2 * np.einsum("piqj, ij ->pq", v_piqj, d_ij)
+    #print(f"F pq 0 and 2 check: {np.allclose(f_pq_0, f_pq_2)}")
 
-    h_ij = h_full.copy()
+    #h_ij = h_full.copy()
 
-    f_ij_1 = h_ij + 2 * np.einsum("piqj, qp", v_piqj, d_pq)
-    print(f"F ij 0 and 1 check: {np.allclose(f_ij_0, f_ij_1)}")
+    #f_ij_1 = h_ij + 2 * np.einsum("piqj, qp", v_piqj, d_pq)
+    #print(f"F ij 0 and 1 check: {np.allclose(f_ij_0, f_ij_1)}")
 
-    v_ijkl = v_full.copy()
+    #v_ijkl = v_full.copy()
 
-    f_ij_2 = h_ij + 2 * np.einsum("ikjl, lk ->ij", v_ijkl, d_ij)
-    print(f"F ij 0 and 2 check: {np.allclose(f_ij_0, f_ij_2)}")
+    #f_ij_2 = h_ij + 2 * np.einsum("ikjl, lk ->ij", v_ijkl, d_ij)
+    #print(f"F ij 0 and 2 check: {np.allclose(f_ij_0, f_ij_2)}")
 
     #v_aux = 0.5 * (v_aux + v_aux.conj().T)
     #v_aux_2 = 0.5 * (v_aux_2 + v_aux_2.conj().T)
@@ -395,6 +440,7 @@ if HF:
     #print(f"h herm test: {np.allclose(h_full, h_full.conj().T)}")
     #print(f"v herm test: {np.allclose(v_full, np.conj(np.transpose(v_full, (2, 3, 0, 1))))}")
 
+    #uses updated epsilon values from fock eigenvalues
     epsilon = fock_final_val
 
 else:
@@ -441,7 +487,10 @@ def t_term(t_upper_1: int, t_upper_2: int, t_lower_1: int, t_lower_2: int, t_sit
 
 def residual_single(x_s:int)->np.array:
     """Calculates R^{a}_{i}(x) singles equation"""
-    R_single = np.zeros((a, i), dtype = complex)
+    if HF and start_point == "sin":
+        R_single = np.zeros((a, i), dtype = complex)
+    else:
+        R_single = np.zeros((a, i))
 
     R_single += np.einsum("ap, pq, qi->ai", A_term(a, p, x_s), h_term(p, q, x_s), B_term(q, i, x_s))
 
@@ -458,7 +507,10 @@ def residual_single(x_s:int)->np.array:
 
 def residual_double_sym(x_ds:int, y_ds:int)->np.array:
     """Calculates Rs^{ab}_{ij}(x < y) symmetric doubles equation"""
-    R_double_symmetric = np.zeros((a, b, i, j), dtype = complex)
+    if HF and start_point == "sin":
+        R_double_symmetric = np.zeros((a, b, i, j), dtype = complex)
+    else:
+        R_double_symmetric = np.zeros((a, b, i, j))
 
     if i_method >= 1:
         # noinspection SpellCheckingInspection
@@ -482,7 +534,11 @@ def residual_double_sym(x_ds:int, y_ds:int)->np.array:
 
 def residual_double_non_sym_1(x_dns_1:int, y_dns_1:int)->np.array:
     """Calculates Rn^{ab}_{ij}(x, y) non-symmetric doubles equation"""
-    R_double_non_symmetric_1 = np.zeros((a, b, i, j), dtype = complex)
+    if HF and start_point == "sin":
+        R_double_non_symmetric_1 = np.zeros((a, b, i, j), dtype = complex)
+    else:
+        R_double_non_symmetric_1 = np.zeros((a, b, i, j))
+
     if i_method >= 1:
         # noinspection SpellCheckingInspection
         R_double_non_symmetric_1 += np.einsum("ap, pc, cbij->abij", A_term(a, p, x_dns_1), h_term(p, c, x_dns_1), t_term(c, b, i, j, x_dns_1, y_dns_1))
@@ -503,7 +559,11 @@ def residual_double_non_sym_1(x_dns_1:int, y_dns_1:int)->np.array:
 
 def residual_double_non_sym_2(x_dns_2:int, y_dns_2:int)->np.array:
     """Calculates Rn^{ba}_{ji}(y, x) ai -> jb permutation non-symmetric doubles equation"""
-    R_double_non_symmetric_2 = np.zeros((b, a, j, i), dtype = complex)
+    if HF and start_point == "sin":
+        R_double_non_symmetric_2 = np.zeros((a, b, i, j), dtype=complex)
+    else:
+        R_double_non_symmetric_2 = np.zeros((a, b, i, j))
+
     if i_method >= 1:
         # noinspection SpellCheckingInspection
         R_double_non_symmetric_2 += np.einsum("bp, pc, caji->baji", A_term(b, p, y_dns_2), h_term(p, c, y_dns_2), t_term(c, a, j, i, y_dns_2, x_dns_2))
@@ -535,7 +595,7 @@ def update_one(r_1_value:np.array)->np.array:
     for u_a_1 in range(a):
         for u_i_1 in range(i):
             update_1[u_a_1, u_i_1] = 1 / (epsilon[u_a_1 + i] - epsilon[u_i_1])
-    #print(f"update 1 max {np.max(update_1)}")
+
     return np.multiply(update_1, r_1_value)
 
 def update_two(r_2_value:np.array)->np.array:
@@ -548,7 +608,7 @@ def update_two(r_2_value:np.array)->np.array:
             for u_i_2 in range(i):
                 for u_j_2 in range(j):
                     update_2[u_a_2, u_b_2, u_i_2, u_j_2] = 1 / (epsilon[u_a_2 + i] + epsilon[u_b_2 + i] - epsilon[u_i_2] - epsilon[u_j_2])
-    #print(f"update 2 max {np.max(update_2)}")
+
     return np.multiply(update_2, r_2_value)
 
 def t_1_amplitude_csv():
@@ -587,8 +647,12 @@ if __name__ == "__main__":
         t_2_amplitudes_file.write("iteration, site 1, site 2, a, b, i, j, value\n")
 
         iteration = 0
-        single = np.zeros((sites, a, i), dtype = complex)
-        double = np.zeros((sites, sites, a, b, i ,j), dtype = complex)
+        if HF and start_point == "sin":
+            single = np.zeros((sites, a, i), dtype = complex)
+            double = np.zeros((sites, sites, a, b, i ,j), dtype = complex)
+        else:
+            single = np.zeros((sites, a, i))
+            double = np.zeros((sites, sites, a, b, i, j))
 
         previous_energy = 0
 
@@ -643,7 +707,7 @@ if __name__ == "__main__":
                 break
 
             #CHANGE BACK TO 10
-            if abs(one_max) >= 100 or abs(two_max) >=100:
+            if abs(one_max) >= 100 or abs(two_max) >= 100:
                 raise ValueError("Diverges")
 
             # writes t1 amplitudes to csv file
@@ -680,14 +744,12 @@ if __name__ == "__main__":
 # if transform:
 #     print(f"E_hf: {e_hf}")
 
-# end = time.perf_counter()
-# # print(f"Time to execute: {end - start}s")
-#
+
 # t_1_max = np.max(np.real(t_a_i_tensor[0]))
 # t_2_max = np.max(np.real(t_ab_ij_tensor[0]))
 # print(f"t_1_max = {t_1_max}")
 # print(f"t_2_max = {t_2_max}")
-#
+
 # max_per_y = []
 # for thing in range(sites):
 #     max_per_y.append(float(np.max(np.real(t_ab_ij_tensor[int(sites/2), thing]))))
